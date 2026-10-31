@@ -1,9 +1,13 @@
 package com.casademassas.erp_massas.controller;
 
+import com.casademassas.erp_massas.dto.HistoricoPrecoDTO;
 import com.casademassas.erp_massas.model.Ingrediente;
+import com.casademassas.erp_massas.repository.HistoricoPrecoRepository;
 import com.casademassas.erp_massas.repository.IngredienteRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 
@@ -14,6 +18,7 @@ import java.util.List;
 public class IngredienteController {
 
     private final IngredienteRepository ingredienteRepository;
+    private final HistoricoPrecoRepository historicoPrecoRepository;
 
     @PostMapping
     public Ingrediente criar(@RequestBody Ingrediente ingrediente) {
@@ -23,5 +28,16 @@ public class IngredienteController {
     @GetMapping
     public List<Ingrediente> listarTodos() {
         return ingredienteRepository.findAll();
+    }
+
+    // Histórico de preços do ingrediente, do registro mais antigo para o mais recente
+    @GetMapping("/{id}/historico")
+    public List<HistoricoPrecoDTO> listarHistorico(@PathVariable Long id) {
+        if (!ingredienteRepository.existsById(id)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Ingrediente não encontrado ID: " + id);
+        }
+        return historicoPrecoRepository.findByIngredienteIdOrderByDataRegistroAsc(id).stream()
+                .map(h -> new HistoricoPrecoDTO(h.getDataRegistro(), h.getPreco()))
+                .toList();
     }
 }
