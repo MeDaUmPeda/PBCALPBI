@@ -8,4 +8,8 @@ import java.util.List;
 @Repository
 public interface HistoricoPrecoRepository extends JpaRepository<HistoricoPreco, Long> {
     List<HistoricoPreco> findTop12ByIngredienteIdOrderByDataRegistroDesc(Long ingredienteId);
+
+    List<HistoricoPreco> findByIngredienteIdOrderByDataRegistroAsc(Long ingredienteId);
+
+    void deleteByIngredienteId(Long ingredienteId);
 }
