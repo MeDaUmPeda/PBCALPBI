@@ -11,5 +11,7 @@ public interface HistoricoPrecoRepository extends JpaRepository<HistoricoPreco, 
 
     List<HistoricoPreco> findByIngredienteIdOrderByDataRegistroAsc(Long ingredienteId);
 
+    List<HistoricoPreco> findAllByOrderByIngredienteIdAscDataRegistroAsc();
+
     void deleteByIngredienteId(Long ingredienteId);
 }

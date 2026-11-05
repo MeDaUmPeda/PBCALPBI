@@ -1,0 +1,4 @@
+requests==2.34.2
+beautifulsoup4==4.15.0
+psycopg[binary]==3.3.8
+pytest==9.2.0

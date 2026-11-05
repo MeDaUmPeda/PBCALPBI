@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
@@ -83,12 +84,26 @@ public class AnaliseTrimestralService {
         );
     }
 
+    /** Análise de todos os ingredientes em uma única chamada; os que têm histórico insuficiente ficam de fora. */
+    @Transactional(readOnly = true)
+    public List<RelatorioReajusteDTO> analisarTodos() {
+        List<RelatorioReajusteDTO> relatorios = new ArrayList<>();
+        for (Ingrediente ingrediente : ingredienteRepository.findAll()) {
+            try {
+                relatorios.add(analisarIngrediente(ingrediente.getId()));
+            } catch (IllegalStateException historicoInsuficiente) {
+                // Fora da lista: quem consome trata o ingrediente como "sem histórico"
+            }
+        }
+        return relatorios;
+    }
+
     /**
      * Recalcula o custo do prato trocando apenas o preço do ingrediente analisado:
      * base = preço no início do período, projetado = preço médio das 12 semanas.
      * Os demais ingredientes usam o preço de custo atual.
      */
-    private ImpactoPratoDTO calcularImpacto(Prato prato, Long ingredienteId, BigDecimal precoInicial, BigDecimal precoMedio) {
+    ImpactoPratoDTO calcularImpacto(Prato prato, Long ingredienteId, BigDecimal precoInicial, BigDecimal precoMedio) {
         BigDecimal custoBase = BigDecimal.ZERO;
         BigDecimal custoProjetado = BigDecimal.ZERO;
         BigDecimal quantidade = BigDecimal.ZERO;
@@ -127,7 +142,7 @@ public class AnaliseTrimestralService {
         );
     }
 
-    private static BigDecimal percentual(BigDecimal de, BigDecimal para) {
+    static BigDecimal percentual(BigDecimal de, BigDecimal para) {
         if (de.signum() == 0) {
             return BigDecimal.ZERO;
         }
