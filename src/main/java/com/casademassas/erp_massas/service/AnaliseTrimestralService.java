@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
@@ -81,6 +82,20 @@ public class AnaliseTrimestralService {
                 mensagem,
                 pratosImpactados
         );
+    }
+
+    /** Análise de todos os ingredientes em uma única chamada; os que têm histórico insuficiente ficam de fora. */
+    @Transactional(readOnly = true)
+    public List<RelatorioReajusteDTO> analisarTodos() {
+        List<RelatorioReajusteDTO> relatorios = new ArrayList<>();
+        for (Ingrediente ingrediente : ingredienteRepository.findAll()) {
+            try {
+                relatorios.add(analisarIngrediente(ingrediente.getId()));
+            } catch (IllegalStateException historicoInsuficiente) {
+                // Fora da lista: quem consome trata o ingrediente como "sem histórico"
+            }
+        }
+        return relatorios;
     }
 
     /**

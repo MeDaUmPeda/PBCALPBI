@@ -9,6 +9,8 @@ import com.casademassas.erp_massas.service.PrevisaoPrecoService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/analise")
 @CrossOrigin("*")
@@ -18,6 +20,11 @@ public class AnaliseController {
     private final AnaliseTrimestralService analiseTrimestralService;
     private final PrevisaoPrecoService previsaoPrecoService;
     private final ExplicacaoPrevisaoService explicacaoPrevisaoService;
+
+    @GetMapping("/trimestral")
+    public List<RelatorioReajusteDTO> analisarTodos() {
+        return analiseTrimestralService.analisarTodos();
+    }
 
     @GetMapping("/trimestral/{ingredienteId}")
     public RelatorioReajusteDTO analisarIngrediente(@PathVariable Long ingredienteId) {
