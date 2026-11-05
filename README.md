@@ -95,6 +95,11 @@ Arquivo `src/main/resources/application.properties`:
 | `spring.jpa.hibernate.ddl-auto` | `update` | O Hibernate cria e atualiza as tabelas a partir das entidades |
 | `analise.limite-variacao` | `10` | Variação percentual (%) acima da qual um ingrediente gera alerta de reajuste |
 | `server.error.include-message` | `always` | Inclui a mensagem do erro no corpo da resposta, para o frontend exibir |
+| `llm.base-url` | `https://api.groq.com/openai/v1` | Endereço de uma API compatível com a da OpenAI |
+| `llm.modelo` | `openai/gpt-oss-120b` | Modelo usado na explicação da previsão. Confirme a disponibilidade no painel do provedor |
+| `llm.api-key` | `${LLM_API_KEY:}` | Chave lida da variável de ambiente `LLM_API_KEY`. Sem chave, o sistema usa o texto padrão |
+
+> Nunca coloque a chave do LLM no repositório. No IntelliJ, defina `LLM_API_KEY` em **Run → Edit Configurations → Environment variables**.
 
 > Para mudar a sensibilidade do alerta, basta alterar `analise.limite-variacao` e reiniciar a aplicação.
 
@@ -204,6 +209,47 @@ preço recomendado  = preço praticado × (1 + variação do custo / 100)
 ```
 Aplicar ao preço a mesma variação percentual do custo **mantém a margem** do prato. Se o prato não tiver preço praticado, o cálculo usa o preço sugerido.
 
+### Previsão de preços (`PrevisaoPrecoService`, `PrevisorPrecos`, `RegressaoRidge`)
+
+Uma **regressão Ridge** (λ = 0,01, sem intercepto) aprende com os 12 registros mais recentes de todos os ingredientes e prevê as próximas 4 semanas, com um modelo por semana:
+```
+entrada         = ln(p[t] / média de p[t-3] a p[t])
+saída           = ln(p[t+h] / p[t])
+preço previsto  = último preço × exp(saída prevista)
+```
+Em outras palavras, o modelo aprende quanto um preço acima ou abaixo da sua média recente tende a voltar a ela. O treino acontece a cada requisição, sem salvar nada no banco.
+
+**Como o modelo foi escolhido:** com os dados da CEAGESP, a versão anterior (duas variações semanais, com intercepto) perdia da referência em todas as semanas. Foram comparados 7 candidatos definidos antes do teste, e a escolha usou apenas as cotações até a 10ª semana. As duas últimas semanas ficaram reservadas para um único teste final (modelo / referência):
+
+| Semana prevista | Teste final | Previsões |
+|---|---|---:|
+| +1 | 9,71% / 9,89% | 434 |
+| +2 | 11,74% / 11,87% | 434 |
+| +3 | 15,70% / 16,19% | 434 |
+| +4 | 21,40% / 21,91% | 217 |
+
+O ganho é real nesse teste, mas pequeno (0,1 a 0,5 ponto percentual), em um período curto e com erros altos: os preços de atacado oscilam muito. Com outros dados, o resultado pode mudar. Por isso a tela mostra o erro de cada semana.
+
+**Backtest:** em cada ponto de corte, o modelo treina só com preços anteriores e é comparado por MAPE com a referência "o preço continua igual ao último".
+
+| Regra | Definição |
+|---|---|
+| Superou a referência | MAPE do modelo menor que o da referência |
+| Faixa de valores | Previsão × (1 ± percentil 80 dos erros do backtest). Baseia-se nos erros passados e não é garantia estatística |
+| Horizonte confiável | Maior semana até a qual todas superaram a referência. Pode não existir |
+| Alerta | Variação prevista no horizonte confiável acima de `analise.limite-variacao`. Vale só para alta |
+| Impacto nos pratos | Último preço como base e previsão no horizonte confiável como projetado. Sem horizonte, não há impacto |
+
+**Limites:** são apenas 12 pontos por ingrediente, sem sazonalidade observável. Os resultados com os dados de exemplo não demonstram desempenho com dados reais.
+
+### Explicação da previsão (`ExplicacaoPrevisaoService`)
+
+Um LLM recebe os números já calculados, em JSON, e escreve um parágrafo para o dono do restaurante. Ele não faz cálculos. O texto só é aceito se todos os números existirem nos dados enviados e se citar os pratos afetados. Textos aceitos ficam em cache na memória até os dados mudarem.
+
+A resposta traz a `mensagem` da própria previsão, com origem `PADRAO`, quando não há chave, o provedor falha ou demora mais de 8 s, a resposta vem vazia ou o texto é rejeitado. Não há novas tentativas.
+
+**Privacidade:** nomes de ingredientes e pratos e os preços são enviados ao provedor. Planos gratuitos podem usar esses dados para melhorar modelos, portanto não use dados confidenciais.
+
 ### Exclusão de ingrediente (`IngredienteService`)
 
 - O histórico de preços do ingrediente é apagado junto.
@@ -220,6 +266,8 @@ Base: `http://localhost:8080`
 | Método | Rota | Descrição | Respostas |
 |---|---|---|---|
 | `GET` | `/api/ingredientes` | Lista todos os ingredientes | 200 |
+| `GET` | `/api/ingredientes/pagina?nome=&pagina=0&tamanho=10` | Lista paginada, em ordem de nome. `nome` filtra por trecho, como um LIKE, sem diferenciar maiúsculas. `tamanho`: 10, 30, 50 ou 100 | 200, **400** se a página ou o tamanho forem inválidos |
+| `GET` | `/api/ingredientes/{id}` | Busca um ingrediente | 200, 404 |
 | `POST` | `/api/ingredientes` | Cadastra um ingrediente | 200 |
 | `DELETE` | `/api/ingredientes/{id}` | Exclui o ingrediente e o histórico dele | 204, 404, **409** se usado em prato |
 | `GET` | `/api/ingredientes/{id}/historico` | Histórico de preços, do mais antigo ao mais recente | 200, 404 |
@@ -236,7 +284,10 @@ Base: `http://localhost:8080`
 
 | Método | Rota | Descrição | Respostas |
 |---|---|---|---|
+| `GET` | `/api/analise/trimestral` | Análise de todos os ingredientes em uma chamada. Os que têm histórico insuficiente ficam de fora | 200 |
 | `GET` | `/api/analise/trimestral/{ingredienteId}` | Análise de 12 semanas e impacto nos pratos | 200, 500 se houver histórico insuficiente |
+| `GET` | `/api/analise/previsao/{ingredienteId}` | Previsão das próximas 4 semanas, com erros do backtest e impacto nos pratos | 200, 404, **422** se os dados forem insuficientes |
+| `GET` | `/api/analise/previsao/{ingredienteId}/explicacao` | Parágrafo explicativo, com `origem` `IA` ou `PADRAO`. Falhas do LLM também respondem 200 | 200, 404, **422** se os dados forem insuficientes |
 
 ### Exemplos
 
@@ -318,6 +369,57 @@ Os ingredientes são referenciados apenas pelo `id`. `custoTotalCalculado` e `pr
 }
 ```
 </details>
+
+---
+
+## Preços reais da CEAGESP
+
+Depois da carga inicial, o script em [`scripts/importar_ceagesp`](scripts/importar_ceagesp/README.md) substitui parte dos preços simulados por cotações reais de atacado e cadastra novos ingredientes. Ele usa as categorias Legumes, Verduras e Diversos da [CEAGESP](https://ceagesp.gov.br/cotacoes/).
+
+### Passo a passo
+
+Requer Python 3.11 ou mais novo e o banco no ar. No PowerShell, a partir da raiz do projeto:
+
+**1. Entrar na pasta e instalar as dependências** (só na primeira vez):
+```powershell
+cd scripts\importar_ceagesp
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+**2. Baixar as cotações** (opcional). O CSV atual já está no repositório. Este comando leva alguns minutos e só substitui o CSV se o download terminar completo:
+```powershell
+.\.venv\Scripts\python.exe importar_ceagesp.py baixar
+```
+
+**3. Fazer um backup do banco:**
+```powershell
+cmd /c "docker exec casademassas-db pg_dump -U postgres casademassas_db > ..\..\..\backup-antes-ceagesp.sql"
+```
+
+**4. Conferir o que vai mudar, sem gravar nada:**
+```powershell
+$env:PGPASSWORD = "senha_do_banco"
+.\.venv\Scripts\python.exe importar_ceagesp.py importar --simular
+```
+
+**5. Importar:**
+```powershell
+.\.venv\Scripts\python.exe importar_ceagesp.py importar
+```
+
+**6. Conferir no site:** recarregue as telas do frontend. Não é preciso reiniciar o backend.
+
+### O que muda no banco
+
+| Dados | Efeito |
+|---|---|
+| Tomate, Cebola, Batata, Alho e Manjericão | Recebem preços reais, e o histórico anterior é apagado |
+| Demais produtos da CEAGESP com 12 semanas completas | Viram ingredientes em `KG` |
+| Ovo, Farinha, Leite, Carne Moída, Molho de Tomate, Azeite, Manteiga, Ricota e Sal | Continuam com preços simulados |
+| Pratos | Custo e preço sugerido são recalculados; o preço praticado não muda |
+
+Os valores são de **venda no atacado em São Paulo**, não o preço pago pelo restaurante. Veja a documentação completa, como desfazer a importação e os limites dos dados no [README do script](scripts/importar_ceagesp/README.md).
 
 ---
 
