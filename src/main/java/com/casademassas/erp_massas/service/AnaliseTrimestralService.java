@@ -88,7 +88,7 @@ public class AnaliseTrimestralService {
      * base = preço no início do período, projetado = preço médio das 12 semanas.
      * Os demais ingredientes usam o preço de custo atual.
      */
-    private ImpactoPratoDTO calcularImpacto(Prato prato, Long ingredienteId, BigDecimal precoInicial, BigDecimal precoMedio) {
+    ImpactoPratoDTO calcularImpacto(Prato prato, Long ingredienteId, BigDecimal precoInicial, BigDecimal precoMedio) {
         BigDecimal custoBase = BigDecimal.ZERO;
         BigDecimal custoProjetado = BigDecimal.ZERO;
         BigDecimal quantidade = BigDecimal.ZERO;
@@ -127,7 +127,7 @@ public class AnaliseTrimestralService {
         );
     }
 
-    private static BigDecimal percentual(BigDecimal de, BigDecimal para) {
+    static BigDecimal percentual(BigDecimal de, BigDecimal para) {
         if (de.signum() == 0) {
             return BigDecimal.ZERO;
         }
